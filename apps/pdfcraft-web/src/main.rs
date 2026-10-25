@@ -58,7 +58,8 @@ fn main() {
                     // editor answers to (`globalThis.__craftHost`); with none declared the editor runs unframed and
                     // saves download.
                     if let Some(bridge) = host::Bridge::new() {
-                        bridge.listen(app.startup_inbox.clone(), app.host_notices.clone(), cc.egui_ctx.clone());
+                        bridge.listen(app.startup_inbox.clone(), app.host_notices.clone(), app.host_runs.clone(), cc.egui_ctx.clone());
+                        app.host_answer = Some(bridge.answer_fn());
                         app.host_save = Some(bridge.save_fn());
                         app.host_dirty = Some(bridge.dirty_fn());
                         bridge.post_ready();
@@ -122,8 +123,10 @@ async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
 ///   `craft:saved {session, versionId}` (the next save's base) or `craft:refused {session, code, reason}`.
 /// - `craft:dirty {session, dirty}` (to the parent): unsaved work appeared or went away.
 /// - `craft:failed {error}` (to the parent): the editor could not start.
-/// - `craft:command {session, id, method, params}` (from the parent) is answered `craft:result {session, id, ok:false}`:
-///   this editor takes no assistant commands yet.
+/// - `craft:command {session, id, method: "command.batch", params: {label, steps: [{name, args?}]}}` (from the parent) is
+///   the assistant's allow-listed run (`pdfcraft_ui_egui::host_commands`): all of it as ONE undo step, or none of it. It is
+///   answered `craft:result {session, id, ok:true, result}` or `{ok:false, error: "<code>: <reason>"}` (a command outside
+///   the list, a step the document forbids, a file open read-only, or a `session` that is not the open one).
 ///
 /// A file opened read-only is never saved (the save fails by name); a second document opened in a tab under a
 /// different name is saved as a copy (`saveAs`), never over the host's file.
@@ -205,7 +208,7 @@ mod host {
         }
 
         /// Hear the host: `craft:open` queues the file like a `?file=` download; `craft:saved` and `craft:refused` answer a save.
-        pub fn listen(&self, inbox: pdfcraft_ui_egui::Inbox, notices: pdfcraft_ui_egui::HostNotices, ctx: egui::Context) {
+        pub fn listen(&self, inbox: pdfcraft_ui_egui::Inbox, notices: pdfcraft_ui_egui::HostNotices, runs: pdfcraft_ui_egui::HostRuns, ctx: egui::Context) {
             let bridge = self.clone();
             let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
                 if event.origin() != bridge.origin || !event.source().is_some_and(|s| js_sys::Object::is(&s, &bridge.parent)) {
@@ -253,15 +256,26 @@ mod host {
                     }
                     "craft:command" => {
                         let session = string(&data, "session").unwrap_or_default();
-                        let id = js_sys::Reflect::get(&data, &JsValue::from_str("id")).unwrap_or(JsValue::from_f64(0.0));
-                        if let Some(m) = message(&[
-                            ("type", "craft:result".into()),
-                            ("session", session.as_str().into()),
-                            ("id", id),
-                            ("ok", false.into()),
-                            ("error", "this editor takes no assistant commands yet".into()),
-                        ]) {
-                            let _ = bridge.post(&m, None);
+                        let id = js_sys::Reflect::get(&data, &JsValue::from_str("id")).ok().and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let (current, read_only) = {
+                            let opened = bridge.opened.borrow();
+                            (opened.session.clone(), opened.read_only)
+                        };
+                        if session.is_empty() || session != current {
+                            bridge.post_result(&session, id, Err("session-mismatch: this command is for another open of the file".into()));
+                        } else if read_only {
+                            bridge.post_result(&session, id, Err("read-only: this file is open to view; the assistant cannot change it".into()));
+                        } else {
+                            let params = js_sys::Reflect::get(&data, &JsValue::from_str("params"))
+                                .ok()
+                                .and_then(|p| js_sys::JSON::stringify(&p).ok())
+                                .and_then(|s| s.as_string())
+                                .and_then(|s| serde_json::from_str(&s).ok())
+                                .unwrap_or(serde_json::Value::Null);
+                            let run = pdfcraft_ui_egui::HostRun { id: serde_json::json!(id), method: string(&data, "method").unwrap_or_default(), params };
+                            if let Ok(mut q) = runs.lock() {
+                                q.push(run);
+                            }
                         }
                     }
                     _ => {}
@@ -272,6 +286,31 @@ mod host {
                 // The listener lives as long as the page.
                 on_message.forget();
             }
+        }
+
+        /// `craft:result {session, id, ok, result|error}` to the parent.
+        pub fn post_result(&self, session: &str, id: f64, outcome: Result<serde_json::Value, String>) {
+            let mut fields: Vec<(&str, JsValue)> =
+                vec![("type", "craft:result".into()), ("session", session.into()), ("id", id.into()), ("ok", outcome.is_ok().into())];
+            match &outcome {
+                Ok(value) => {
+                    let result = js_sys::JSON::parse(&value.to_string()).unwrap_or(JsValue::NULL);
+                    fields.push(("result", result));
+                }
+                Err(error) => fields.push(("error", error.as_str().into())),
+            }
+            if let Some(m) = message(&fields) {
+                let _ = self.post(&m, None);
+            }
+        }
+
+        /// Answers a relayed run, on the session it was asked in.
+        pub fn answer_fn(&self) -> pdfcraft_ui_egui::HostAnswerFn {
+            let bridge = self.clone();
+            Box::new(move |id: &serde_json::Value, outcome: Result<serde_json::Value, String>| {
+                let session = bridge.opened.borrow().session.clone();
+                bridge.post_result(&session, id.as_f64().unwrap_or(0.0), outcome);
+            })
         }
 
         pub fn save_fn(&self) -> pdfcraft_ui_egui::HostSaveFn {

@@ -51,6 +51,7 @@ pub mod comments;
 mod comments_panel;
 mod compare_ui;
 pub mod control;
+pub mod host_commands;
 mod create_multiple_ui;
 mod create_ui;
 mod credits;
@@ -555,6 +556,8 @@ pub type HostSaveFn = Box<dyn Fn(&str, &[u8], bool) -> Result<(), String>>;
 /// Told every frame whether any tab has unsaved work, so a host page can warn before leaving.
 pub type HostDirtyFn = Box<dyn FnMut(bool)>;
 
+pub use host_commands::{HostAnswerFn, HostRun, HostRuns};
+
 pub struct PasswordPrompt {
     pub name: String,
     pub path: Option<String>,
@@ -788,6 +791,10 @@ pub struct PdfCraftApp {
     pub host_save: Option<HostSaveFn>,
     /// Reports unsaved work to the embedding page (web, see [`HostDirtyFn`]).
     pub host_dirty: Option<HostDirtyFn>,
+    /// Assistant runs the host relayed (`craft:command`), run on the next frame (see [`host_commands`]).
+    pub host_runs: HostRuns,
+    /// Answers a relayed run to the host (web host bridge).
+    pub host_answer: Option<HostAnswerFn>,
     /// A pending "save changes?" question (closing a dirty tab or quitting).
     pub close_request: Option<CloseRequest>,
     /// The button of the "save changes?" question the keyboard has chosen; Save when it opens.
@@ -1185,6 +1192,8 @@ impl PdfCraftApp {
             os_events: None,
             host_save: None,
             host_dirty: None,
+            host_runs: Default::default(),
+            host_answer: None,
             close_request: None,
             save_prompt_button: Default::default(),
             save_prompt_seen: false,
@@ -3582,6 +3591,7 @@ impl eframe::App for PdfCraftApp {
         for message in host_notices {
             self.notify(message);
         }
+        self.drain_host_runs();
         let os_events = self.os_events.as_mut().map(|poll| poll()).unwrap_or_default();
         for e in os_events {
             match e {

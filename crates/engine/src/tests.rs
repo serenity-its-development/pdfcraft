@@ -1034,6 +1034,32 @@ fn batch_is_one_undo_step_and_all_or_nothing() {
 }
 
 #[test]
+fn merge_undo_folds_the_steps_since_a_depth_into_one() {
+    let (mut s, id) = session_with(3);
+    s.apply(id, Edit::RotatePages { pages: vec![2], degrees: 90 }).unwrap();
+    let depth = s.undo_depth(id);
+    assert_eq!(depth, 1);
+    s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    s.apply(id, Edit::DeletePages { pages: vec![1] }).unwrap();
+    assert_eq!(s.merge_undo(id, depth, "Assistant: tidy"), 2);
+    assert_eq!(s.undo_depth(id), 2);
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Assistant: tidy"));
+    assert_eq!(s.undo(id).unwrap().as_str(), "Assistant: tidy");
+    // Back to the state at `depth`: three pages, only the first rotation kept.
+    assert_eq!(s.get(id).unwrap().info.pages.len(), 3);
+    assert_eq!(s.get(id).unwrap().info.pages[0].rotation, 0);
+    assert_eq!(s.get(id).unwrap().info.pages[2].rotation, 90);
+    s.redo(id).unwrap();
+    assert_eq!(s.get(id).unwrap().info.pages.len(), 2);
+    // Nothing new, or one new step with no label: left alone.
+    let d = s.undo_depth(id);
+    assert_eq!(s.merge_undo(id, d, "x"), 0);
+    s.apply(id, Edit::ReversePages { pages: vec![0, 1] }).unwrap();
+    assert_eq!(s.merge_undo(id, d, ""), 0);
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Reverse pages"));
+}
+
+#[test]
 fn insert_blank_between_pages_keeps_both_neighbours() {
     let (mut s, id) = session_with(2);
     s.apply(id, Edit::InsertBlankPage { at: 1, width: 200.0, height: 300.0 }).unwrap();

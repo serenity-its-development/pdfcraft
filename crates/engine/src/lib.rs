@@ -4155,6 +4155,29 @@ impl Session {
         Ok(())
     }
 
+    /// How many undo steps the document holds now (for [`Self::merge_undo`]).
+    pub fn undo_depth(&self, id: DocId) -> usize {
+        self.get(id).and_then(|d| d.editor.as_ref()).map_or(0, |e| e.undo.len())
+    }
+
+    /// Fold every undo step added since the document held `depth` steps into ONE step named `label` (the host's
+    /// assistant runs: one run, one Undo). The step goes back to the state at `depth`; nothing is re-inspected,
+    /// because the document already shows the state after the last step. A lone new step keeps its own name when
+    /// `label` is empty. Returns how many steps were folded (0: the history is as it was).
+    pub fn merge_undo(&mut self, id: DocId, depth: usize, label: &str) -> usize {
+        let Ok(doc) = self.doc_mut(id) else { return 0 };
+        let Some(editor) = doc.editor.as_mut() else { return 0 };
+        if editor.undo.len() <= depth || (editor.undo.len() == depth + 1 && label.is_empty()) {
+            return 0;
+        }
+        let folded = editor.undo.len() - depth;
+        let mut tail = editor.undo.split_off(depth);
+        let (first_label, state, keys, _) = tail.remove(0);
+        let name = if label.is_empty() { first_label } else { Label::with("{batch}", label) };
+        editor.undo.push((name, state, keys, Scope::Full));
+        folded
+    }
+
     pub fn undo(&mut self, id: DocId) -> Result<Label, EditError> {
         let doc = self.doc_mut(id)?;
         let editor = doc.editor.as_mut().ok_or(EditError::NothingToUndo)?;
