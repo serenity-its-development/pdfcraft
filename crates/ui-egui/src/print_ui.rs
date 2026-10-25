@@ -1007,7 +1007,7 @@ pub(crate) fn body(
                 }
                 ui.end_row();
                 // The spooler answered with no printer at all (#160): say so, rather than
-                // leaving Save as PDF looking like the only thing PdfCraft can do.
+                // leaving Save as PDF looking like the only thing PDF can do.
                 if !d.printers_loading && d.printers.is_empty() {
                     ui.label("");
                     ui.label(

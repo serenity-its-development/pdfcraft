@@ -2,7 +2,7 @@
 //! alignment; bold, italic, underline, superscript and subscript; line and paragraph spacing;
 //! horizontal scale and character spacing. One panel serves a paragraph being edited (with the
 //! fonts already on its page and the spacing controls) and added text (the standard families,
-//! size, colour, style, alignment and character spacing). What PdfCraft can't apply yet (lists,
+//! size, colour, style, alignment and character spacing). What PDF can't apply yet (lists,
 //! superscript and subscript, paragraph spacing, or line spacing and scale for added text) is shown
 //! disabled and says so.
 //!
@@ -260,7 +260,7 @@ fn row<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     .inner
 }
 
-/// A control PdfCraft doesn't have yet: its icon, disabled, saying so when hovered.
+/// A control PDF doesn't have yet: its icon, disabled, saying so when hovered.
 fn planned(ui: &mut egui::Ui, icon: &str, label: &str) {
     let _ = ui
         .add_enabled_ui(false, |ui| icons::button(ui, icon, 30.0, false, label))

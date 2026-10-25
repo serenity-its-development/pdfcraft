@@ -826,7 +826,7 @@ fn a_save_prompt_opened_in_the_background_asks_for_attention_until_the_user_retu
     h.get_by_label("Cancel").click();
     assert!(attention_over(&mut h, 3).is_empty());
     assert_eq!(h.state().views.len(), 1, "cancel keeps the document open");
-    // With PdfCraft in front, the prompt is in plain sight.
+    // With PDF in front, the prompt is in plain sight.
     close_window(&mut h);
     assert!(attention_over(&mut h, 4).is_empty());
     h.get_by_label_contains("Save changes to “doc.pdf”");
@@ -859,7 +859,7 @@ impl Drop for TempPdfs {
     }
 }
 
-/// The app with Preferences ▸ Reopen the files that were open when PdfCraft last closed on.
+/// The app with Preferences ▸ Reopen the files that were open when PDF last closed on.
 fn session_harness(setup: impl FnOnce(&mut PdfCraftApp) + 'static) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
@@ -920,7 +920,7 @@ fn quitting_with_unsaved_changes_still_remembers_every_file() {
     h.state_mut().active = Some(1);
     h.state_mut().close_request = Some(CloseRequest::Quit);
     h.run_steps(3);
-    // Each unsaved tab closes as it is answered, before PdfCraft quits.
+    // Each unsaved tab closes as it is answered, before PDF quits.
     for _ in 0..2 {
         h.get_by_label("Don't save").click();
         h.run_steps(3);

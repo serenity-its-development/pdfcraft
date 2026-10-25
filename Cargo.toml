@@ -9,7 +9,7 @@ version = "0.13.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
-repository = "https://github.com/storytold/pdfcraft"
+repository = "https://github.com/serenity-its-development/pdfcraft"
 
 [workspace.dependencies]
 # Shared frontend components; engines remain independent of egui.
@@ -108,6 +108,15 @@ incremental = false
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# OneOS: the web/WASM build (`pdfcraft-web`) is served as a static asset (25 MiB per file at most) and loaded over
+# the network, so it is built for size. Not used for the desktop app.
+[profile.web-release]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+panic = "abort"
+debug = 0
 
 # Vendored, patched third-party crates (see vendor/README.md). Each patch is meant to go upstream.
 [patch.crates-io]

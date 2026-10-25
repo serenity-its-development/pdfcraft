@@ -37,7 +37,7 @@ pub const ALLOWED_LICENCES: &[&str] = &[
 ];
 
 /// The closed list of Adobe-authored, non-visual technical data (AGENTS.md §1.1): (crate, path).
-/// Storyteller's own brand marks (the ArtCraft name and logos): shipped in the app and docs, but
+/// Third-party brand marks (the brand names and logos): shipped in the app and docs, but
 /// not licensed for reuse by forks. Allowed only for `kind = "logo"` entries under `docs/brand/`
 /// (AGENTS.md §1.2).
 pub const BRAND_LICENCE: &str = "LicenseRef-Storyteller-Trademark";
@@ -617,8 +617,8 @@ mod tests {
     fn brand_licence_only_for_brand_logos() {
         let root = super::root();
         for (path, kind, pass) in [
-            ("docs/brand/artcraft-mark.svg", "logo", true),
-            ("docs/brand/artcraft-mark.svg", "icon", false),
+            ("docs/brand/example-mark.svg", "logo", true),
+            ("docs/brand/example-mark.svg", "icon", false),
             ("assets/icons/mark.svg", "logo", false),
         ] {
             let mut a = asset(path, "Storyteller", kind, BRAND_LICENCE);

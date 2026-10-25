@@ -1,6 +1,6 @@
 //! Fill & Sign (Acrobat's Fill & Sign tool, execution plan M5.7): type text onto the page, place
 //! ✓ ✕ ● ─ marks and today's date (in Preferences ▸ Date format), and sign with a drawn
-//! signature. Everything is an annotation (typewriter text, PdfCraft-drawn stamps, ink), so it
+//! signature. Everything is an annotation (typewriter text, PDF-drawn stamps, ink), so it
 //! can be moved, deleted and undone like any comment.
 
 use egui::{Color32, CornerRadius, Pos2, Sense, Stroke, pos2, vec2};
@@ -885,7 +885,7 @@ fn scan_tab(
 ) -> bool {
     ui.label(
         egui::RichText::new(tl!(
-            "Sign a sheet of white paper and take a photo of it in bright, even light (use the flash). Choose the photo or drop it here: PdfCraft finds the signature and removes the paper."
+            "Sign a sheet of white paper and take a photo of it in bright, even light (use the flash). Choose the photo or drop it here: PDF finds the signature and removes the paper."
         ))
         .color(t.text_muted),
     );

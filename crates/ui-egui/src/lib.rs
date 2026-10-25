@@ -1,4 +1,4 @@
-//! pdfcraft-ui-egui — the first PdfCraft shell (L7).
+//! pdfcraft-ui-egui — the first PDF shell (L7).
 //!
 //! Layout grammar follows plan/acrobat/02-ui-ux.md §1: tab strip, mode bar, left tool panel,
 //! floating quick-action bar, document area, right panel + right rail with page navigation.
@@ -530,6 +530,10 @@ pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 /// `(name, error)`, reported to the user on the next frame (#173).
 pub type FailedInbox = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
 
+/// Messages the embedding page wants shown as notices (OneOS: a save the host refused, by name),
+/// drained on the next frame.
+pub type HostNotices = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
 /// A request the operating system sends the running app, outside its window: on macOS, Finder
 /// double-clicks, Open With and drops on the Dock icon arrive as Apple events, not arguments.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -543,7 +547,7 @@ pub enum OsEvent {
 /// Returns the [`OsEvent`]s that arrived since it was last called (set by the desktop app).
 pub type OsEventsFn = Box<dyn FnMut() -> Vec<OsEvent>>;
 
-/// Hands a saved PDF to the page embedding PdfCraft (web): `(name, bytes, save_as)`. `save_as`
+/// Hands a saved PDF to the page embedding PDF (web): `(name, bytes, save_as)`. `save_as`
 /// is `true` for Save As. Set by the web app when a host page (such as a Nextcloud app) asked
 /// for saves; without it the browser downloads the file.
 pub type HostSaveFn = Box<dyn Fn(&str, &[u8], bool) -> Result<(), String>>;
@@ -716,14 +720,14 @@ pub struct PdfCraftApp {
     /// tab coming to the front (Home, a document, Combine files) puts the view away.
     all_tools_tab: (Option<DocId>, bool),
     pub recent: Vec<RecentFile>,
-    /// Preferences: reopen the files that were open when PdfCraft last closed (#442).
+    /// Preferences: reopen the files that were open when PDF last closed (#442).
     pub reopen_last_session: bool,
     /// Restore last view settings when reopening documents (Preferences ▸ Documents and view;
     /// #1767): the page, zoom and page display a file was last shown with. On by default.
     pub restore_last_view: bool,
     /// How files were last shown, most recent first (see `last_view`).
     pub last_views: Vec<last_view::LastView>,
-    /// The files open when PdfCraft last closed, read from the settings for
+    /// The files open when PDF last closed, read from the settings for
     /// [`PdfCraftApp::reopen_last_files`].
     pub last_session: last_session::LastSession,
     /// Quitting closes unsaved tabs one by one: what was open when the quit began.
@@ -774,6 +778,8 @@ pub struct PdfCraftApp {
     startup_superseded: bool,
     /// Asynchronous opens that failed (web `?file=` fetches), shown as a notice.
     pub failed_inbox: FailedInbox,
+    /// Notices from the embedding page (web host bridge), shown on the next frame.
+    pub host_notices: HostNotices,
     /// Mirrors "some document has unsaved work" each frame, so the web page's `beforeunload` handler can read it (#812).
     pub unsaved_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Requests from the operating system, polled every frame (macOS Apple events).
@@ -990,8 +996,6 @@ pub struct PdfCraftApp {
     pub replace_draft: Option<files::ReplaceDraft>,
     /// The last web link the app asked the system to open (tests and automation).
     pub last_opened_url: Option<String>,
-    /// The home screen's community card was closed; it comes back next launch (not remembered).
-    pub community_card_closed: bool,
     /// A document asked to open this address; the user hasn't answered yet (#90, #91).
     pub pending_link: Option<PendingLink>,
     /// A document just opened asks to be shown in Full Screen mode (`/PageMode /FullScreen`):
@@ -1176,6 +1180,7 @@ impl PdfCraftApp {
             startup_inbox: Default::default(),
             startup_superseded: false,
             failed_inbox: Default::default(),
+            host_notices: Default::default(),
             unsaved_flag: Default::default(),
             os_events: None,
             host_save: None,
@@ -1269,7 +1274,6 @@ impl PdfCraftApp {
             control: None,
             bookmark_rename: None,
             last_opened_url: None,
-            community_card_closed: false,
             pending_link: None,
             pending_full_screen: None,
             pending_remote_link: None,
@@ -2290,7 +2294,7 @@ impl PdfCraftApp {
         client
     }
 
-    /// Open a web link in the system browser (a new tab on the web). Only for PdfCraft's own
+    /// Open a web link in the system browser (a new tab on the web). Only for PDF's own
     /// links; an address that came from a document goes through [`Self::request_document_url`].
     pub fn open_url(&mut self, url: &str) {
         if let Some(ctx) = &self.ctx {
@@ -2313,9 +2317,9 @@ impl PdfCraftApp {
             Err(e) => {
                 use pdfcraft_engine::links::BlockedLink;
                 let template = if matches!(e, BlockedLink::MailFile | BlockedLink::MailEncodedWord) {
-                    "{who} in this document tried to open an address PdfCraft won't open: {e}."
+                    "{who} in this document tried to open an address PDF won't open: {e}."
                 } else {
-                    "{who} in this document tried to open an address PdfCraft won't open: {e}. Only web (http, https) and email (mailto) links open from documents."
+                    "{who} in this document tried to open an address PDF won't open: {e}. Only web (http, https) and email (mailto) links open from documents."
                 };
                 self.notify_fmt(template, &[("who", tl!(origin.noun())), ("e", &e.to_string())]);
             }
@@ -3574,6 +3578,10 @@ impl eframe::App for PdfCraftApp {
         for (name, e) in failed {
             self.notify_fmt("Couldn't open {name}: {e}", &[("name", &name), ("e", &e)]);
         }
+        let host_notices: Vec<String> = self.host_notices.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default();
+        for message in host_notices {
+            self.notify(message);
+        }
         let os_events = self.os_events.as_mut().map(|poll| poll()).unwrap_or_default();
         for e in os_events {
             match e {
@@ -3667,7 +3675,7 @@ impl eframe::App for PdfCraftApp {
             .active
             .and_then(|i| crate::canvas::tab_label(self, i))
             .or_else(|| self.combine_showing().then(|| tl!("Combine files").to_owned()))
-            .map_or_else(|| "PdfCraft".to_owned(), |name| format!("{name} — PdfCraft"));
+            .map_or_else(|| "PDF".to_owned(), |name| format!("{name} — PDF"));
         if title != self.window_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.window_title = title;

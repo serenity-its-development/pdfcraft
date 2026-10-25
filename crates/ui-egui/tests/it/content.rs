@@ -646,7 +646,7 @@ fn released_text_does_not_jump_back_before_the_page_is_redrawn() {
 }
 
 /// Format text is laid out as Acrobat's: alignment from its flyout, style buttons by name, and
-/// the controls PdfCraft can't apply yet present but disabled.
+/// the controls PDF can't apply yet present but disabled.
 /// Format text lines its rows up (#3037): the size list is centred beside the colour swatch and
 /// the alignment button and is as tall as the font list, each spacing row's controls share one
 /// line, and nothing reaches past the font list, which spans the panel.

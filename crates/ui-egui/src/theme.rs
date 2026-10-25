@@ -25,7 +25,7 @@ pub enum ThemePreference {
 
 impl ThemePreference {
     /// The colours to draw. `system` is what the operating system says, `None` when it says
-    /// nothing; `fallback` is supplied by the caller. PdfCraft uses Light for an unknown desktop.
+    /// nothing; `fallback` is supplied by the caller. PDF uses Light for an unknown desktop.
     pub fn resolve(self, system: Option<bool>, fallback: ThemeKind) -> ThemeKind {
         match self {
             Self::Light => ThemeKind::Light,
