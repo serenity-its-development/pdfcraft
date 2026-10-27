@@ -101,6 +101,7 @@ mod home;
 mod icon_data;
 pub mod icons;
 pub mod last_session;
+pub mod first_view;
 pub mod last_view;
 pub mod motion;
 mod page_pointer;
