@@ -417,6 +417,8 @@ pub struct DocView {
     pub forward: Vec<usize>,
     /// Pending navigation: page and fraction down the page to align with the viewport top.
     pub goto: Option<(usize, f32)>,
+    /// The text selected in the host's read-only first view, still to be found once its page's text is read ([`crate::first_view`]).
+    pub(crate) first_view_text: Option<crate::first_view::PendingText>,
     /// Pending position within that page from a destination ([`Self::go_to_dest`]): the point
     /// (fractions of the displayed page; `None` leaves that axis to `goto`) to put `rel` points
     /// from the viewport's top-left corner.
@@ -762,6 +764,7 @@ impl DocView {
             back: Vec::new(),
             forward: Vec::new(),
             goto: None,
+            first_view_text: None,
             goto_point: None,
             key_scroll: 0.0,
             single_edges: None,

@@ -3,6 +3,9 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod handoff;
+
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use eframe::wasm_bindgen::JsCast;
@@ -57,14 +60,16 @@ fn main() {
                     // OneOS host bridge: the frame page's loader (`bootstrap.js`) declares the ONE parent origin this
                     // editor answers to (`globalThis.__craftHost`); with none declared the editor runs unframed and
                     // saves download.
+                    let mut handoff = None;
                     if let Some(bridge) = host::Bridge::new() {
                         bridge.listen(app.startup_inbox.clone(), app.host_notices.clone(), app.host_runs.clone(), cc.egui_ctx.clone());
                         app.host_answer = Some(bridge.answer_fn());
                         app.host_save = Some(bridge.save_fn());
                         app.host_dirty = Some(bridge.dirty_fn());
                         bridge.post_ready();
+                        handoff = Some((bridge, handoff::Handoff::new()));
                     }
-                    Ok(Box::new(app))
+                    Ok(Box::new(Shell { app, handoff }))
                 }),
             )
             .await;
@@ -75,6 +80,52 @@ fn main() {
             }
         }
     });
+}
+
+/// The app and, when framed by OneOS, the progressive open's hand-over to the host (`craft:opened`, the first view's place,
+/// `craft:viewed`: `handoff.rs`).
+#[cfg(target_arch = "wasm32")]
+struct Shell {
+    app: pdfcraft_ui_egui::PdfCraftApp,
+    handoff: Option<(host::Bridge, handoff::Handoff<Option<u64>>)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Shell {
+    /// The document the app shows (the id of the active view): it changes when the host's file is opened.
+    fn shown(app: &pdfcraft_ui_egui::PdfCraftApp) -> Option<u64> {
+        app.active.and_then(|i| app.views.get(i)).map(|v| v.id.0)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl eframe::App for Shell {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        self.app.raw_input_hook(ctx, raw);
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.app.save(storage);
+    }
+
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if let Some((bridge, handoff)) = self.handoff.as_mut() {
+            handoff.before(bridge, Self::shown(&self.app));
+        }
+        self.app.logic(ctx, frame);
+        if let Some((bridge, handoff)) = self.handoff.as_mut() {
+            let shown = Self::shown(&self.app);
+            let busy = self.app.first_view_busy();
+            let app = &mut self.app;
+            if handoff.after_with(bridge, shown, |view| { app.open_at_first_view(&view.selection, view.y_fraction()); }, busy) {
+                ctx.request_repaint();
+            }
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.app.ui(ui, frame);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -123,6 +174,10 @@ async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
 ///   `craft:saved {session, versionId}` (the next save's base) or `craft:refused {session, code, reason}`.
 /// - `craft:dirty {session, dirty}` (to the parent): unsaved work appeared or went away.
 /// - `craft:failed {error}` (to the parent): the editor could not start.
+/// - `craft:opened {session}` (to the parent): the document is loaded and drawn; the editor takes input. `craft:view {session, scrollTop,
+///   scrollHeight, clientHeight, selection ...}` (from the parent, kept by the loader on `globalThis.__craftFirstView`): where the host's
+///   read-only first view was left; the editor opens there (the page and the offset in it, the selected text) and answers
+///   `craft:viewed {session}` once that is drawn (`handoff.rs`).
 /// - `craft:command {session, id, method: "command.batch", params: {label, steps: [{name, args?}]}}` (from the parent) is
 ///   the assistant's allow-listed run (`pdfcraft_ui_egui::host_commands`): all of it as ONE undo step, or none of it. It is
 ///   answered `craft:result {session, id, ok:true, result}` or `{ok:false, error: "<code>: <reason>"}` (a command outside
@@ -200,6 +255,22 @@ mod host {
             }
         }
 
+        /// `craft:opened {session}`: the document is loaded and drawn, the editor takes input (handoff.rs).
+        pub fn post_opened(&self) {
+            let session = self.opened.borrow().session.clone();
+            if let Some(m) = message(&[("type", "craft:opened".into()), ("session", session.as_str().into())]) {
+                let _ = self.post(&m, None);
+            }
+        }
+
+        /// `craft:viewed {session}`: the first view's place is applied and drawn; the host may let the first view go.
+        pub fn post_viewed(&self) {
+            let session = self.opened.borrow().session.clone();
+            if let Some(m) = message(&[("type", "craft:viewed".into()), ("session", session.as_str().into())]) {
+                let _ = self.post(&m, None);
+            }
+        }
+
         /// The app couldn't start (no WebGL, for example): let the parent say so.
         pub fn post_failed(&self, error: &str) {
             if let Some(m) = message(&[("type", "craft:failed".into()), ("error", error.into())]) {
@@ -237,7 +308,10 @@ mod host {
                         if let Ok(mut q) = inbox.lock() {
                             q.push((name, bytes));
                         }
+                        crate::handoff::wasm::note_open();
                     }
+                    // The loader keeps the place on `__craftFirstView`; the app reads it (handoff.rs) - this wakes it.
+                    "craft:view" => {}
                     "craft:saved" => {
                         let mut opened = bridge.opened.borrow_mut();
                         if string(&data, "session").as_deref() == Some(opened.session.as_str())
@@ -355,6 +429,21 @@ mod host {
                     last = Some((session, dirty));
                 }
             })
+        }
+    }
+
+    impl crate::handoff::Link for Bridge {
+        fn open_seq(&self) -> u64 {
+            crate::handoff::wasm::opens()
+        }
+        fn take_view(&self) -> Option<crate::handoff::FirstView> {
+            crate::handoff::wasm::take_view(&self.opened.borrow().session)
+        }
+        fn post_opened(&self) {
+            Bridge::post_opened(self);
+        }
+        fn post_viewed(&self) {
+            Bridge::post_viewed(self);
         }
     }
 
