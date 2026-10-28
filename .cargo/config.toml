@@ -1,2 +1,39 @@
 [alias]
 xtask = "run -p xtask --"
+
+# OneOS: every storytold git source is read from our fork (the pinned revisions are present there), so a plain --locked build never reaches a third party.
+[source.storytold-1]
+git = "https://github.com/storytold/craft-libs"
+rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675"
+replace-with = "oneos-1"
+[source.oneos-1]
+git = "https://github.com/serenity-its-development/craft-libs"
+rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675"
+[source.storytold-2]
+git = "https://github.com/storytold/craft-libs"
+rev = "666c358065261a2816b376fa3bb10538dbf53040"
+replace-with = "oneos-2"
+[source.oneos-2]
+git = "https://github.com/serenity-its-development/craft-libs"
+rev = "666c358065261a2816b376fa3bb10538dbf53040"
+[source.storytold-3]
+git = "https://github.com/storytold/craft-libs"
+rev = "82a24b006eefa036b43c09a67fb9a3fbd17ffe63"
+replace-with = "oneos-3"
+[source.oneos-3]
+git = "https://github.com/serenity-its-development/craft-libs"
+rev = "82a24b006eefa036b43c09a67fb9a3fbd17ffe63"
+[source.storytold-4]
+git = "https://github.com/storytold/craft-libs"
+rev = "f58bc1a3df490992d633393d0898af0588ce882c"
+replace-with = "oneos-4"
+[source.oneos-4]
+git = "https://github.com/serenity-its-development/craft-libs"
+rev = "f58bc1a3df490992d633393d0898af0588ce882c"
+[source.storytold-5]
+git = "https://github.com/storytold/winprint.rs"
+rev = "5f80b9baf6b58937c401656634e42d33f00ddf49"
+replace-with = "oneos-5"
+[source.oneos-5]
+git = "https://github.com/serenity-its-development/winprint.rs"
+rev = "5f80b9baf6b58937c401656634e42d33f00ddf49"
