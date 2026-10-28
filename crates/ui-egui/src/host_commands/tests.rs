@@ -93,7 +93,9 @@ fn a_failing_step_takes_back_the_steps_before_it() {
 #[test]
 fn view_steps_are_no_edit() {
     let mut app = app(3);
-    let out = app.run_command_batch(&json!({"steps": [{"name": "view.goto", "args": {"page": 2}}, {"name": "view.zoom", "args": {"percent": 150}}]})).unwrap();
+    let out = app
+        .run_command_batch(&json!({"steps": [{"name": "view.goto", "args": {"page": 2}}, {"name": "view.zoom", "args": {"percent": 150}}]}))
+        .unwrap();
     assert_eq!(out["edits"], 0);
     assert_eq!(depth(&app), 0);
     let inspect = app.run_command_batch(&json!({"steps": [{"name": "inspect"}]})).unwrap();
@@ -124,4 +126,27 @@ fn relayed_runs_are_answered_on_the_next_frame() {
     assert_eq!(got[0].0, json!(7));
     assert_eq!(got[0].1.as_ref().unwrap()["undo"], "Flip");
     assert!(got[1].1.as_ref().unwrap_err().starts_with("unknown-method"));
+}
+
+#[test]
+fn the_allow_list_and_the_commands_left_out_are_the_whole_catalog_with_nothing_twice() {
+    let all: Vec<String> = pdfcraft_engine::commands::COMMANDS.iter().map(|c| c.id.to_string()).collect();
+    let mut seen = std::collections::HashSet::new();
+    for id in ASSISTANT_COMMANDS {
+        assert!(all.iter().any(|c| c == id), "{id} is not a command of the app");
+        assert!(seen.insert(id.to_string()), "{id} is listed twice");
+    }
+    // The window's own commands stand beside the registry's: they are not in it.
+    for id in ARGUMENT_COMMANDS {
+        assert!(seen.insert(id.to_string()), "{id} is listed twice");
+    }
+    for (reason, ids) in LEFT_OUT {
+        assert!(reason.len() > 20, "a reason: {reason}");
+        for id in *ids {
+            assert!(all.iter().any(|c| c == id), "{id} is left out but is not a command of the app");
+            assert!(seen.insert(id.to_string()), "{id} is both allowed and left out, or left out twice");
+        }
+    }
+    let missing: Vec<&String> = all.iter().filter(|c| !seen.contains(c.as_str())).collect();
+    assert!(missing.is_empty(), "commands neither allowed nor left out (with a reason): {missing:?}");
 }
