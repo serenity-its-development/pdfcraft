@@ -1,0 +1,18 @@
+[package]
+name = "pdfcraft-host-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "PDF's host window compiled for node (wasm-bindgen), so OneOS can drive a PDF through the pdf.* tools in a test: the same command.batch the browser build answers craft:command with, on the same app"
+
+# No workspace lints: the wasm-bindgen macros expand to code the workspace's `unsafe_code = "forbid"` refuses.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pdfcraft-ui-egui = { workspace = true }
+serde_json = { workspace = true }
+base64 = "0.22"
+wasm-bindgen = "0.2"

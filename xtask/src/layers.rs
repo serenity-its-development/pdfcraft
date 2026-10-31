@@ -88,6 +88,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("pdfcraft", Class::Exempt),
     ("cli", Class::Exempt),
     ("web", Class::Exempt),
+    // The node host window OneOS's AI-drive tests open (wasm-bindgen over ui-egui).
+    ("host-node", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 

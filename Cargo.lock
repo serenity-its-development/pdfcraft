@@ -4188,6 +4188,16 @@ name = "pdfcraft-geom"
 version = "0.13.0"
 
 [[package]]
+name = "pdfcraft-host-node"
+version = "0.13.0"
+dependencies = [
+ "base64 0.22.1",
+ "pdfcraft-ui-egui",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "pdfcraft-js"
 version = "0.13.0"
 dependencies = [
