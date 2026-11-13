@@ -5,6 +5,8 @@
 
 #[cfg(any(target_arch = "wasm32", test))]
 mod handoff;
+#[cfg(any(target_arch = "wasm32", test))]
+mod export;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
@@ -113,6 +115,20 @@ impl eframe::App for Shell {
             handoff.before(bridge, Self::shown(&self.app));
         }
         self.app.logic(ctx, frame);
+        // The host's asks for the bytes: the document as it stands, with nothing committed, flattened or marked saved.
+        if let Some((bridge, _)) = self.handoff.as_ref() {
+            for request in bridge.take_exports() {
+                let Some(id) = self.app.active.and_then(|i| self.app.views.get(i)).map(|v| v.id) else { continue };
+                match self.app.session.save_bytes(id) {
+                    Ok(bytes) => {
+                        if let Err(e) = bridge.post_export(&bytes, request) {
+                            eframe::web_sys::console::warn_1(&format!("PDF: the export could not be handed to the host: {e}").into());
+                        }
+                    }
+                    Err(e) => eframe::web_sys::console::warn_1(&format!("PDF: {} could not be exported: {e}", bridge.opened_name()).into()),
+                }
+            }
+        }
         if let Some((bridge, handoff)) = self.handoff.as_mut() {
             let shown = Self::shown(&self.app);
             let busy = self.app.first_view_busy();
@@ -169,6 +185,8 @@ async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
 ///
 /// - `craft:ready {app, version}` (to the parent): listening; send the file now.
 /// - `craft:open {session, name, mime, bytes, versionId, readOnly, collab}` (from the parent): open these bytes.
+/// - `craft:export {session, request}` (from the parent): the host asks for the document's bytes as they stand; answered by
+///   `craft:save {…, checkpoint: request}` (`export.rs`). Never a save of the person's: nothing is committed or marked saved.
 /// - `craft:save {session, name, mime, bytes, baseVersionId, saveAs}` (to the parent): the person saved; the bytes are a
 ///   transferred `ArrayBuffer`. The host makes a NEW version of the file through the compare-and-set and answers
 ///   `craft:saved {session, versionId}` (the next save's base) or `craft:refused {session, code, reason}`.
@@ -210,6 +228,8 @@ mod host {
         app: String,
         version: String,
         opened: Rc<RefCell<Opened>>,
+        /// The host's asks for the document's bytes (`craft:export`), judged when heard and answered on the next frame.
+        exports: Rc<RefCell<Vec<u64>>>,
     }
 
     /// `scheme://host[:port]` exactly: https, or http only on localhost (the dev estate).
@@ -238,6 +258,7 @@ mod host {
                 app: string(&declared, "app").unwrap_or_else(|| "pdf".into()),
                 version: string(&declared, "version").unwrap_or_else(|| env!("CARGO_PKG_VERSION").into()),
                 opened: Rc::default(),
+                exports: Rc::default(),
             })
         }
 
@@ -328,6 +349,19 @@ mod host {
                             }
                         }
                     }
+                    // The host asks for the bytes as they stand (auto-save, save on close): answered on the next frame (`export.rs`).
+                    "craft:export" => {
+                        let asked = string(&data, "session").unwrap_or_default();
+                        let request = js_sys::Reflect::get(&data, &JsValue::from_str("request")).ok().and_then(|v| v.as_f64());
+                        let judged = {
+                            let opened = bridge.opened.borrow();
+                            crate::export::judge(&opened.session, opened.read_only, &asked, request)
+                        };
+                        match judged {
+                            Ok(request) => bridge.exports.borrow_mut().push(request),
+                            Err(why) => eframe::web_sys::console::warn_1(&format!("PDF: an export ask was not taken: {why:?}").into()),
+                        }
+                    }
                     "craft:command" => {
                         let session = string(&data, "session").unwrap_or_default();
                         let id = js_sys::Reflect::get(&data, &JsValue::from_str("id")).ok().and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -360,6 +394,37 @@ mod host {
                 // The listener lives as long as the page.
                 on_message.forget();
             }
+        }
+
+        /// The export asks heard since the last frame.
+        pub fn take_exports(&self) -> Vec<u64> {
+            std::mem::take(&mut *self.exports.borrow_mut())
+        }
+
+        /// The host's file name for the open this frame holds (an export is always the opened file, never a copy).
+        pub fn opened_name(&self) -> String {
+            self.opened.borrow().name.clone()
+        }
+
+        /// `craft:save {…, checkpoint: request}` to the parent: the answer to its `craft:export`. Never a save of the person's.
+        pub fn post_export(&self, bytes: &[u8], request: u64) -> Result<(), String> {
+            let (session, name, base) = {
+                let opened = self.opened.borrow();
+                (opened.session.clone(), opened.name.clone(), opened.version_id.clone())
+            };
+            let buffer = js_sys::Uint8Array::from(bytes).buffer();
+            let m = message(&[
+                ("type", "craft:save".into()),
+                ("session", session.as_str().into()),
+                ("name", name.as_str().into()),
+                ("mime", "application/pdf".into()),
+                ("baseVersionId", base.as_str().into()),
+                ("saveAs", false.into()),
+                ("checkpoint", (request as f64).into()),
+                ("bytes", buffer.clone().into()),
+            ])
+            .ok_or_else(|| "couldn't build the message".to_string())?;
+            self.post(&m, Some(&buffer))
         }
 
         /// `craft:result {session, id, ok, result|error}` to the parent.
